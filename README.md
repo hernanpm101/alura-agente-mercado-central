@@ -50,7 +50,7 @@ Usuario (pregunta en lenguaje natural)
 
 ```
 alura-agente-mercado-central/
-├── Alura_Agente_Mercado_Central.ipynb   # Notebook principal (Google Colab)
+├── Alura_Agente_Mercado_Central_v2.ipynb   # Notebook principal (Google Colab)
 ├── requirements.txt                      # Dependencias del proyecto
 ├── .gitignore
 └── README.md
