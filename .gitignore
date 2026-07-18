@@ -1,0 +1,21 @@
+# Documentos descargados en tiempo de ejecución (se regeneran solos con el notebook)
+*.pdf
+*.xlsx
+*.csv
+
+# Índices vectoriales generados
+faiss_index*/
+*.faiss
+
+# Entornos y cachés de Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.env
+
+# Modelos descargados de Hugging Face (se vuelven a bajar solos)
+.cache/
+
+# Archivos del sistema
+.DS_Store

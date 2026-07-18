@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-google-genai
+langchain-huggingface
+langchain-classic
+langchain-text-splitters
+sentence-transformers
+pypdf
+pandas
+openpyxl
+faiss-cpu
+requests
