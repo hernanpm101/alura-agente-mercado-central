@@ -2,7 +2,7 @@
 
 Agente de IA que responde preguntas en lenguaje natural sobre los documentos internos de **Mercado Central 24h**, un supermercado de operación continua (24/7): inventario, política de atención al cliente, FAQ, reglamento interno y manual de proveedores. Cualquier colaborador puede preguntarle directamente en vez de tener que abrir y buscar dentro de cada documento.
 
-Proyecto final del challenge de Alura: lectura de documentos + agente conversacional + (próximo paso) deploy en Oracle Cloud (OCI).
+Proyecto final del challenge de Alura: lectura de documentos + agente conversacional + deploy en la nube (Render).
 
 ## 🏗️ Arquitectura
 
@@ -50,7 +50,7 @@ Usuario (pregunta en lenguaje natural)
 
 ```
 alura-agente-mercado-central/
-├── Alura_Agente_Mercado_Central_v2.ipynb   # Notebook principal (Google Colab)
+├── Alura_Agente_Mercado_Central.ipynb   # Notebook principal (Google Colab)
 ├── requirements.txt                      # Dependencias del proyecto
 ├── .gitignore
 └── README.md
@@ -119,16 +119,29 @@ Estos son ejemplos reales generados por el agente, tal como los devolvió en la 
 >
 > *(Ejemplo del modo interactivo del agente — sección 9 del notebook.)*
 
-## ☁️ Deploy en OCI (Oracle Cloud) — próximo paso
+## ☁️ Deploy en la nube
 
-1. Crear una instancia **OCI Compute** (Ubuntu, shape "Always Free" alcanza).
-2. Conectarse por SSH e instalar Python 3 y las dependencias de `requirements.txt`.
-3. Convertir la lógica del notebook en un script/API simple (por ejemplo con Flask o FastAPI) que exponga un endpoint `/preguntar`.
-4. Configurar el Security List / firewall de la instancia para exponer el puerto elegido (ej. 8000).
-5. Correr la app como servicio persistente (`systemd` o `nohup`).
-6. Verificar acceso público vía `http://<IP-pública>:<puerto>`.
+La consigna del challenge sugiere **OCI Compute** para el deploy, aclarando explícitamente que es una sugerencia y no una obligación ("si contamos con una herramienta que conocemos mejor y que tenga más sentido para nuestro proyecto, podemos usarla"). Se intentó primero con OCI, pero **el proceso de registro de la cuenta gratuita de Oracle Cloud falló repetidamente** (error genérico de creación de cuenta, un problema reportado por numerosos usuarios en foros de Oracle y no atribuible a un error de configuración propio). Tras varios intentos con distintas regiones sin éxito, se optó por desplegar en **Render**, una plataforma cloud con un tier gratuito de registro simple y confiable.
 
-> 📸 *Acá va el link o la captura de pantalla de la aplicación corriendo en OCI.*
+**🔗 Aplicación desplegada:** *(completar con la URL pública, ej. `https://alura-agente-mercado-central.onrender.com`)*
+
+### Cómo se hizo el deploy
+
+1. Se envolvió la lógica del notebook en una aplicación **Flask** (`app.py`), que expone:
+   - Una página web simple (`/`) con un formulario para preguntarle al agente.
+   - Un endpoint JSON (`/preguntar`) para integraciones programáticas.
+2. Se subió el código a este mismo repositorio de GitHub.
+3. Se creó un **Web Service** en Render, conectado directamente al repositorio (branch `main`).
+4. Configuración usada:
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `gunicorn app:app`
+   - **Instance Type:** Free
+   - **Variable de entorno:** `GOOGLE_API_KEY` (la API key de Gemini, configurada como secreto en Render, nunca expuesta en el código ni en el repositorio)
+5. Al arrancar, la app descarga los documentos, genera los embeddings localmente (sin depender de ninguna cuota externa) y arma el índice — igual que en el notebook.
+
+> ⚠️ **Nota:** al estar en el tier gratuito, la instancia "se duerme" tras un período de inactividad. La primera consulta después de un tiempo sin uso puede tardar 30-90 segundos en responder mientras el servidor arranca y reconstruye el índice — es un comportamiento esperado del plan gratuito, no un error de la aplicación.
+
+*(Acá va la captura de pantalla de la aplicación funcionando en Render.)*
 
 ## 🔧 Personalización
 
@@ -137,3 +150,4 @@ Para usar otros documentos, alcanza con cambiar el diccionario `archivos` en la 
 ## 🙌 Créditos
 
 Proyecto desarrollado como challenge final del curso de Alura sobre agentes de IA.
+
