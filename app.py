@@ -21,7 +21,7 @@ from flask import Flask, request, jsonify, render_template_string
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_classic.chains import create_retrieval_chain
@@ -81,7 +81,7 @@ def construir_agente():
     descargar_documentos()
     chunks = cargar_y_trocear()
 
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    embeddings = FastEmbedEmbeddings(model_name="intfloat/multilingual-e5-small")
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
