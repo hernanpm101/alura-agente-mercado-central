@@ -2,11 +2,11 @@
 Alura Agente — Mercado Central 24h
 API/Web app que envuelve el agente RAG para poder desplegarlo en la nube.
 
-Al arrancar (una sola vez por proceso):
-  1. Descarga los documentos de Mercado Central 24h (PDFs + Excel).
-  2. Los carga y trocea.
-  3. Genera embeddings locales (Hugging Face, sin cuota) y arma el índice FAISS.
-  4. Crea la cadena de preguntas y respuestas con Gemini.
+El índice FAISS ya viene PRECALCULADO (carpeta faiss_index_deploy/, generada en Colab
+y subida junto con el código) para evitar picos de memoria al generar cientos de
+embeddings en el momento del deploy — el free tier de la nube tiene poca RAM disponible.
+En producción, la app solo carga el índice y genera el embedding de cada pregunta
+individual, que es mucho más liviano.
 
 Expone:
   GET  /             -> formulario simple para preguntarle al agente
@@ -14,13 +14,8 @@ Expone:
 """
 
 import os
-import requests
-import pandas as pd
 from flask import Flask, request, jsonify, render_template_string
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -30,72 +25,12 @@ from langchain_core.prompts import ChatPromptTemplate
 
 app = Flask(__name__)
 
-# ---------------------------------------------------------------------------
-# 1. Descargar los documentos (si no están ya en disco)
-# ---------------------------------------------------------------------------
-ARCHIVOS = {
-    "faq.pdf": "https://cdn1.gnarususercontent.com.br/documents/6/internal/c0a37625-c8ee-44f2-885f-7b30480d3017.pdf",
-    "politica_atencion.pdf": "https://cdn1.gnarususercontent.com.br/documents/6/internal/b9abdeaf-ffcb-46c4-8e1b-16935a594875.pdf",
-    "reglamento_interno.pdf": "https://cdn1.gnarususercontent.com.br/documents/6/internal/ed99ddc6-bead-47fd-886b-c007c7e36885.pdf",
-    "manual_proveedores.pdf": "https://cdn1.gnarususercontent.com.br/documents/6/internal/6ce88d4f-3c95-42c3-aef3-c156e859f000.pdf",
-    "inventario.xlsx": "https://cdn1.gnarususercontent.com.br/documents/6/internal/e4dc3cc4-55d5-453b-bc68-3f5ef090fc7f.xlsx",
-}
+INDEX_PATH = "faiss_index_deploy"
 
 
-def descargar_documentos():
-    for nombre, url in ARCHIVOS.items():
-        if not os.path.exists(nombre):
-            r = requests.get(url, timeout=60)
-            r.raise_for_status()
-            with open(nombre, "wb") as f:
-                f.write(r.content)
-            print(f"Descargado: {nombre}")
-
-
-# ---------------------------------------------------------------------------
-# 2. Cargar y trocear los documentos
-# ---------------------------------------------------------------------------
-def cargar_y_trocear():
-    todos_documentos = []
-
-    pdfs = ["faq.pdf", "politica_atencion.pdf", "reglamento_interno.pdf", "manual_proveedores.pdf"]
-    for pdf in pdfs:
-        todos_documentos.extend(PyPDFLoader(pdf).load())
-
-    df = pd.read_excel("inventario.xlsx")
-    GRUPO_FILAS = 60
-    for i in range(0, len(df), GRUPO_FILAS):
-        bloque = df.iloc[i:i + GRUPO_FILAS]
-        todos_documentos.append(
-            Document(page_content=bloque.to_string(index=False), metadata={"source": "inventario.xlsx"})
-        )
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=3500, chunk_overlap=200)
-    return splitter.split_documents(todos_documentos)
-
-
-# ---------------------------------------------------------------------------
-# 3 y 4. Embeddings locales + índice FAISS + cadena del agente
-# ---------------------------------------------------------------------------
 def construir_agente():
-    import gc
-
-    descargar_documentos()
-    chunks = cargar_y_trocear()
-
     embeddings = FastEmbedEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-
-    BATCH_SIZE = 20
-    vectorstore = None
-    for i in range(0, len(chunks), BATCH_SIZE):
-        lote = chunks[i:i + BATCH_SIZE]
-        if vectorstore is None:
-            vectorstore = FAISS.from_documents(lote, embeddings)
-        else:
-            vectorstore.add_documents(lote)
-        print(f"Embeddings: procesados {min(i + BATCH_SIZE, len(chunks))}/{len(chunks)} fragmentos")
-        gc.collect()
-
+    vectorstore = FAISS.load_local(INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
@@ -118,7 +53,7 @@ Contexto:
     return create_retrieval_chain(retriever, question_answer_chain)
 
 
-print("Inicializando agente (esto puede tardar 1-2 minutos la primera vez)...")
+print("Cargando índice precalculado y armando el agente...")
 qa_chain = construir_agente()
 print("Agente listo.")
 

@@ -6,8 +6,5 @@ langchain-google-genai
 langchain-classic
 langchain-text-splitters
 fastembed
-pypdf
-pandas
-openpyxl
 faiss-cpu
 requests
