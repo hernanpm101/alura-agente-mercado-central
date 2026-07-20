@@ -63,14 +63,14 @@ def cargar_y_trocear():
         todos_documentos.extend(PyPDFLoader(pdf).load())
 
     df = pd.read_excel("inventario.xlsx")
-    GRUPO_FILAS = 25
+    GRUPO_FILAS = 60
     for i in range(0, len(df), GRUPO_FILAS):
         bloque = df.iloc[i:i + GRUPO_FILAS]
         todos_documentos.append(
             Document(page_content=bloque.to_string(index=False), metadata={"source": "inventario.xlsx"})
         )
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=3500, chunk_overlap=200)
     return splitter.split_documents(todos_documentos)
 
 
@@ -78,11 +78,24 @@ def cargar_y_trocear():
 # 3 y 4. Embeddings locales + índice FAISS + cadena del agente
 # ---------------------------------------------------------------------------
 def construir_agente():
+    import gc
+
     descargar_documentos()
     chunks = cargar_y_trocear()
 
     embeddings = FastEmbedEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    vectorstore = FAISS.from_documents(chunks, embeddings)
+
+    BATCH_SIZE = 20
+    vectorstore = None
+    for i in range(0, len(chunks), BATCH_SIZE):
+        lote = chunks[i:i + BATCH_SIZE]
+        if vectorstore is None:
+            vectorstore = FAISS.from_documents(lote, embeddings)
+        else:
+            vectorstore.add_documents(lote)
+        print(f"Embeddings: procesados {min(i + BATCH_SIZE, len(chunks))}/{len(chunks)} fragmentos")
+        gc.collect()
+
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
     llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
