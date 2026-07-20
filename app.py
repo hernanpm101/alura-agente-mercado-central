@@ -81,7 +81,7 @@ def construir_agente():
     descargar_documentos()
     chunks = cargar_y_trocear()
 
-    embeddings = FastEmbedEmbeddings(model_name="intfloat/multilingual-e5-small")
+    embeddings = FastEmbedEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     vectorstore = FAISS.from_documents(chunks, embeddings)
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
