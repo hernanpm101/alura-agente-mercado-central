@@ -75,8 +75,19 @@ def preguntar(pregunta: str):
     fragmentos = buscar_fragmentos(pregunta)
     contexto = "\n\n".join(f"[{f['source']}]\n{f['text']}" for f in fragmentos)
     respuesta = chain.invoke({"context": contexto, "input": pregunta})
+
+    contenido = respuesta.content
+    if isinstance(contenido, list):
+        texto = "".join(
+            bloque.get("text", "")
+            for bloque in contenido
+            if isinstance(bloque, dict) and bloque.get("type") == "text"
+        )
+    else:
+        texto = contenido
+
     fuentes = sorted(set(f["source"] for f in fragmentos))
-    return respuesta.content, fuentes
+    return texto, fuentes
 
 
 print("Agente listo.")
