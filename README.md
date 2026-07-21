@@ -38,6 +38,8 @@ Usuario (pregunta en lenguaje natural)
   Respuesta en español + fuentes usadas (qué documento la sustenta)
 ```
 
+> 📌 Este diagrama corresponde al **notebook de Colab**. La versión **desplegada en Render** usa la misma estructura general, pero reemplaza el paso 3 (embeddings semánticos) por **TF-IDF** (`scikit-learn`), por una limitación de memoria del tier gratuito de la nube — ver la sección [☁️ Deploy en la nube](#️-deploy-en-la-nube) para el detalle completo.
+
 ### Por qué este stack
 
 - **LangChain**: orquesta la carga, indexación y consulta de los documentos.
@@ -121,27 +123,43 @@ Estos son ejemplos reales generados por el agente, tal como los devolvió en la 
 
 ## ☁️ Deploy en la nube
 
-La consigna del challenge sugiere **OCI Compute** para el deploy, aclarando explícitamente que es una sugerencia y no una obligación ("si contamos con una herramienta que conocemos mejor y que tenga más sentido para nuestro proyecto, podemos usarla"). Se intentó primero con OCI, pero **el proceso de registro de la cuenta gratuita de Oracle Cloud falló repetidamente** (error genérico de creación de cuenta, un problema reportado por numerosos usuarios en foros de Oracle y no atribuible a un error de configuración propio). Tras varios intentos con distintas regiones sin éxito, se optó por desplegar en **Render**, una plataforma cloud con un tier gratuito de registro simple y confiable.
+La consigna del challenge sugiere **OCI Compute** para el deploy, aclarando explícitamente que es una sugerencia y no una obligación ("si contamos con una herramienta que conocemos mejor y que tenga más sentido para nuestro proyecto, podemos usarla"). Se recorrió el siguiente camino hasta llegar a una solución estable:
 
-**🔗 Aplicación desplegada:** *(completar con la URL pública, ej. `https://alura-agente-mercado-central.onrender.com`)*
+1. **Oracle Cloud (OCI):** el registro de la cuenta gratuita falló repetidamente con un error genérico de creación de cuenta — un problema reportado por numerosos usuarios en foros de Oracle, no atribuible a la configuración propia.
+2. **Render (con embeddings semánticos, igual que en Colab):** el registro y la conexión con GitHub funcionaron sin problemas, pero el proceso de generar embeddings con un modelo de IA (incluso liviano, vía ONNX/`fastembed`, sin PyTorch) superaba una y otra vez el límite de 512 MB de RAM del tier gratuito.
+3. **Hugging Face Spaces:** descartado porque la plataforma dejó de ofrecer el SDK Docker de forma gratuita poco antes de intentar el deploy.
+4. **Render (versión final, con TF-IDF):** se reemplazó el enfoque de embeddings neuronales por **TF-IDF** (`scikit-learn`) para la búsqueda de fragmentos relevantes en la versión desplegada. TF-IDF es una técnica clásica de recuperación por palabras clave que no requiere cargar ningún modelo de IA en memoria, resolviendo el problema de RAM de raíz.
 
-### Cómo se hizo el deploy
+**🔗 Aplicación desplegada:** [https://alura-agente-mercado-central.onrender.com](https://alura-agente-mercado-central.onrender.com)
 
-1. Se envolvió la lógica del notebook en una aplicación **Flask** (`app.py`), que expone:
+### Cómo se hizo el deploy final
+
+1. Se envolvió la lógica del agente en una aplicación **Flask** (`app.py`), que expone:
    - Una página web simple (`/`) con un formulario para preguntarle al agente.
    - Un endpoint JSON (`/preguntar`) para integraciones programáticas.
-2. Se subió el código a este mismo repositorio de GitHub.
-3. Se creó un **Web Service** en Render, conectado directamente al repositorio (branch `main`).
-4. Configuración usada:
+2. Los fragmentos de los documentos (generados en el notebook de Colab) se exportaron a un archivo liviano `chunks_export.json` (texto + fuente de cada fragmento), sin ningún modelo de embeddings de por medio.
+3. En producción, la app arma un índice **TF-IDF** con esos fragmentos al arrancar (instantáneo, consume apenas unos MB de RAM) y usa similitud de coseno para encontrar los fragmentos más relevantes a cada pregunta.
+4. La respuesta final se genera con **Gemini** (`gemini-3-flash-preview`), igual que en el notebook — el LLM nunca fue el cuello de botella de memoria, solo el paso de embeddings.
+5. Se subió el código a este mismo repositorio de GitHub, y se creó un **Web Service** en Render conectado directamente al repositorio (branch `main`):
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn app:app`
+   - **Start Command:** `gunicorn --timeout 120 app:app`
    - **Instance Type:** Free
    - **Variable de entorno:** `GOOGLE_API_KEY` (la API key de Gemini, configurada como secreto en Render, nunca expuesta en el código ni en el repositorio)
-5. Al arrancar, la app descarga los documentos, genera los embeddings localmente (sin depender de ninguna cuota externa) y arma el índice — igual que en el notebook.
 
-> ⚠️ **Nota:** al estar en el tier gratuito, la instancia "se duerme" tras un período de inactividad. La primera consulta después de un tiempo sin uso puede tardar 30-90 segundos en responder mientras el servidor arranca y reconstruye el índice — es un comportamiento esperado del plan gratuito, no un error de la aplicación.
+> ⚠️ **Nota 1:** al estar en el tier gratuito, la instancia "se duerme" tras un período de inactividad. La primera consulta después de un tiempo sin uso puede tardar 30-90 segundos en responder mientras el servidor arranca — es un comportamiento esperado del plan gratuito, no un error de la aplicación.
+>
+> ⚠️ **Nota 2:** el notebook de Colab (`Alura_Agente_Mercado_Central_v2.ipynb`) sigue usando el enfoque semántico completo (embeddings de IA con FAISS), ya que ahí no hay restricción de memoria. El cambio a TF-IDF aplica **solo** a la versión desplegada en Render, como solución práctica al límite de RAM del tier gratuito de la nube — una decisión de ingeniería documentada, no una limitación oculta.
 
-*(Acá va la captura de pantalla de la aplicación funcionando en Render.)*
+### Evidencia de funcionamiento
+
+**Pregunta:** ¿Cuál es el plazo para devolver carnes y pescados frescos?
+
+**Respuesta real de la app en producción:**
+> No encontré información específica sobre el plazo exacto para la devolución de carnes y pescados frescos en los documentos proporcionados. El documento politica_atencion.pdf solo detalla explícitamente el plazo para la categoría de Frutas y Verduras, el cual es de 24 horas desde la compra. Sin embargo, para los productos perecederos en general (que incluyen carnes y pescados), el mismo documento establece lo siguiente: no es obligatorio devolver físicamente el producto si está en mal estado; una fotografía enviada por WhatsApp es evidencia suficiente para procesar el reembolso; si no es posible la reposición inmediata, se emite un crédito en la App por el valor del producto más un 15% de bonificación.
+>
+> *Fuentes usadas: faq.pdf, politica_atencion.pdf*
+
+*(Agregar acá una captura de pantalla de la aplicación corriendo en `alura-agente-mercado-central.onrender.com`.)*
 
 ## 🔧 Personalización
 
@@ -150,4 +168,3 @@ Para usar otros documentos, alcanza con cambiar el diccionario `archivos` en la 
 ## 🙌 Créditos
 
 Proyecto desarrollado como challenge final del curso de Alura sobre agentes de IA.
-
