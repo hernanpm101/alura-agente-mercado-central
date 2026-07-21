@@ -1,10 +1,5 @@
 flask
 gunicorn
-langchain
-langchain-community
+scikit-learn
 langchain-google-genai
-langchain-classic
-langchain-text-splitters
-fastembed
-faiss-cpu
-requests
+langchain-core

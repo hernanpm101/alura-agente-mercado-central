@@ -1,12 +1,15 @@
 """
 Alura Agente — Mercado Central 24h
-API/Web app que envuelve el agente RAG para poder desplegarlo en la nube.
+Versión de deploy: usa TF-IDF (scikit-learn) para la búsqueda de fragmentos relevantes,
+en vez de un modelo de embeddings neuronal. Esto elimina por completo el problema de
+memoria que sufríamos con modelos de IA para embeddings en el tier gratuito de la nube
+(512 MB de RAM no alcanzan para cargar un modelo neuronal + el resto del stack).
 
-El índice FAISS ya viene PRECALCULADO (carpeta faiss_index_deploy/, generada en Colab
-y subida junto con el código) para evitar picos de memoria al generar cientos de
-embeddings en el momento del deploy — el free tier de la nube tiene poca RAM disponible.
-En producción, la app solo carga el índice y genera el embedding de cada pregunta
-individual, que es mucho más liviano.
+TF-IDF es una técnica clásica de recuperación de información basada en palabras clave
+(no en significado semántico) — el consumo de RAM es de apenas unos pocos MB, sin
+depender de ningún modelo externo. El notebook de Colab sigue usando el enfoque
+semántico con embeddings de IA; este cambio aplica solo a la versión desplegada,
+donde el límite de memoria es la restricción real del entorno gratuito.
 
 Expone:
   GET  /             -> formulario simple para preguntarle al agente
@@ -14,28 +17,44 @@ Expone:
 """
 
 import os
+import json
 from flask import Flask, request, jsonify, render_template_string
 
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from langchain_community.vectorstores import FAISS
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_classic.chains import create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 app = Flask(__name__)
 
-INDEX_PATH = "faiss_index_deploy"
+# ---------------------------------------------------------------------------
+# 1. Cargar los fragmentos precalculados y armar el índice TF-IDF
+# ---------------------------------------------------------------------------
+with open("chunks_export.json", "r", encoding="utf-8") as f:
+    DOCUMENTOS = json.load(f)
+
+TEXTOS = [d["text"] for d in DOCUMENTOS]
+
+print(f"Armando índice TF-IDF con {len(TEXTOS)} fragmentos...")
+vectorizer = TfidfVectorizer()
+matriz = vectorizer.fit_transform(TEXTOS)
+print("Índice TF-IDF listo.")
 
 
-def construir_agente():
-    embeddings = FastEmbedEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    vectorstore = FAISS.load_local(INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+def buscar_fragmentos(pregunta: str, k: int = 4):
+    vector_pregunta = vectorizer.transform([pregunta])
+    similitudes = cosine_similarity(vector_pregunta, matriz)[0]
+    top_k_idx = similitudes.argsort()[::-1][:k]
+    return [DOCUMENTOS[i] for i in top_k_idx]
 
-    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
 
-    system_prompt = """Sos el asistente virtual de Mercado Central 24h. Respondé preguntas de colaboradores o clientes
+# ---------------------------------------------------------------------------
+# 2. LLM y prompt
+# ---------------------------------------------------------------------------
+llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
+
+system_prompt = """Sos el asistente virtual de Mercado Central 24h. Respondé preguntas de colaboradores o clientes
 basándote únicamente en el contexto de los documentos internos que se te provee (inventario, política de atención,
 FAQ, reglamento interno, manual de proveedores).
 Si la respuesta no está en el contexto, decí claramente que no encontraste esa información en los documentos, no inventes datos.
@@ -44,17 +63,22 @@ Respondé siempre en español, de forma clara y directa, citando de qué documen
 Contexto:
 {context}"""
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{input}"),
-    ])
+prompt = ChatPromptTemplate.from_messages([
+    ("system", system_prompt),
+    ("human", "{input}"),
+])
 
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    return create_retrieval_chain(retriever, question_answer_chain)
+chain = prompt | llm
 
 
-print("Cargando índice precalculado y armando el agente...")
-qa_chain = construir_agente()
+def preguntar(pregunta: str):
+    fragmentos = buscar_fragmentos(pregunta)
+    contexto = "\n\n".join(f"[{f['source']}]\n{f['text']}" for f in fragmentos)
+    respuesta = chain.invoke({"context": contexto, "input": pregunta})
+    fuentes = sorted(set(f["source"] for f in fragmentos))
+    return respuesta.content, fuentes
+
+
 print("Agente listo.")
 
 # ---------------------------------------------------------------------------
@@ -98,9 +122,8 @@ def home():
     if request.method == "POST":
         pregunta = request.form.get("pregunta", "").strip()
         if pregunta:
-            resultado = qa_chain.invoke({"input": pregunta})
-            respuesta = resultado["answer"]
-            fuentes = ", ".join(sorted(set(doc.metadata.get("source", "desconocida") for doc in resultado["context"])))
+            respuesta, fuentes_list = preguntar(pregunta)
+            fuentes = ", ".join(fuentes_list)
     return render_template_string(PAGINA_HTML, respuesta=respuesta, fuentes=fuentes, pregunta=pregunta)
 
 
@@ -111,9 +134,8 @@ def preguntar_api():
     if not pregunta:
         return jsonify({"error": "Falta el campo 'pregunta' en el body JSON."}), 400
 
-    resultado = qa_chain.invoke({"input": pregunta})
-    fuentes = sorted(set(doc.metadata.get("source", "desconocida") for doc in resultado["context"]))
-    return jsonify({"pregunta": pregunta, "respuesta": resultado["answer"], "fuentes": fuentes})
+    respuesta, fuentes = preguntar(pregunta)
+    return jsonify({"pregunta": pregunta, "respuesta": respuesta, "fuentes": fuentes})
 
 
 if __name__ == "__main__":
